@@ -1,4 +1,4 @@
-# Large Languge models
+# Large Language models
 
 ## LLM for text
 
