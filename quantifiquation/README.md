@@ -30,7 +30,16 @@ Performing quantization to go from float32 to float16 is quite straightforward s
 
 GPTQ est une méthode de quantification après l'entrainemnt pour rendre le modèle plus petit avec un dataset de calibration. L'idée derrière GPTQ est simple, ça quantifie chaque poids en trouvant une vesrion compressé de ce poid qui va réduire au maximum une MSE.
 
-Avec GPTQ, on applique une post quantifiquations une fois pour toute, et cela va donner une sauvegarde de mémoire et une exélération de l'inférence (contrairement à la quantifiquation 4/8 bit). AutoGPTQ est une bibliothèque qui permet la quantifiquation GPTQ? 
+Avec GPTQ, on applique une post quantifiquations une fois pour toute, et cela va donner une sauvegarde de mémoire et une accélération de l'inférence (contrairement à la quantifiquation 4/8 bit). AutoGPTQ est une bibliothèque qui permet la quantifiquation GPTQ? 
+
+Les bénéifices de autoGPTQ :
+* **rapide pour la génération de texte** : Les modèles quantifié GPTQ sont plus rapides que les modèles auntifiés avec bitsandbytes pour al génération de texte.
+* **n_bit support** : l'algo GPTQ rend la quantifiquation possible jusqu'à 2 bits. Cependant, il y un risque de forte dégradations de performances. Le nombre recommendé de bits est 4, qui semble être un bon contreparti pour GPTQ.
+
+Les points d'améliorations possibles :
+* L'utilisation d'un dataset de calibration peut décourager certains utilisateurs. De plus, cela peut prendre plusieurs jeures pour quantifier le modèle.
+* Fonctionne seulement pour les modèles de langues pour l'instant. 
+
 
 ```
 pip install auto-gptq
@@ -55,6 +64,8 @@ De plus, il est possible de finetuné un modèle GPTQ en utilisant PEFT comme ce
 ###  4/8-bit Quantization with bistandbytes
 
 bistandbytes est une bibliothèque utilisé pour appliquer une quantifiquation 8-bit ou 4-bit. Il peut être utilisé duant l'entrainement pour un entrainement en mixed-precision ou avant l'inférence pour rendre le modèle plus petit. 
+
+bitsandbytes est la façon la plus simple de quantifier un modèle comme ça ne nécessite pas de calibrer le modèle quantifié avec des données en entrée (zero_shot quantization). 
 
 8-bit quantization enables multi-billion parameter scale models to fit in smaller hardware without degrading performance. 8bit quantization works as follows :
 1. Extract the larger values (outliers) columnwise from the input hidden states.
@@ -86,3 +97,40 @@ from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", load_in_4bit=True, device_map="auto")
 ```
 
+## Adapter fine-tuning
+
+Ce n'est pas possible de faire un véritable entrainement sur un modèle quantifié. Cependant, il est possible de finetuné des modèles quantifiés avec des méthodes **PEFT (parameter efficient fine tuning)** et d'entrainer des adapeteurs au dessus de ces modèles. La méthode de finetuning va être basé sur une méthode appelé **LoRA (Low Rank Adapters)** : au lieu de finetuné le modèle entier, on va juste juste finetuner ces adapeteurs et les charger proprement dans le modèle.
+
+**QLoRA** réduit la mémoire utilisé lors des finetuning de LLM sans contreparti niveau performances comparé au finetuning de modèle en 16-bit standard. Cette méthode permer un finetuning d'un modèle de 33B  sur un GPU 24GB et un finetuning d'un modèle 65B sur un GPU 46GB. 
+
+QLoRA utilise la quantifiquation 4-bit pour compressé un LLM préentrainé. Les paramètres du LM sont ensuite gelé et un petit nombre de paramètres entrainables sont ajoutés au modèle sous la forme de **Low-Rank Adapaters**. Durant le finetuning, QLoRA rétropage les gardient au travers du modèle LM prétentrainé quantifié 4-bit gelé jusqu'au Low-Rank Adapters. Les couches LoRA sont les seuls paramètres qui sont mise à jours surant l'entrainement. [Papier QLoRA](https://arxiv.org/abs/2305.14314).
+
+```
+pip install -q -U bitsandbytes
+pip install -q -U git+https://github.com/huggingface/transformers.git
+pip install -q -U git+https://github.com/huggingface/peft.git
+pip install -q -U git+https://github.com/huggingface/accelerate.git
+```
+On charge le modèle en 4-bit
+```
+from transformers import AutoModelForCausalLM
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m", load_in_4bit=True, device_map="auto")
+```
+
+On peut jouer avec différentes varaiationd e quantifiquation 4-bits comme NF4 (normalized float 4) ou la pure quantifiquation FP4. il est recommendé d'utiliser la quantifiquation NF4 pour de meilleurs performances.
+
+Exemple pour charger un modèle en 4bits en utilisant la quantifiquation NF4 avec une double quantiifquation avec le dtype de calcul en bfloat16 pour un entrainement plus rapide :
+```
+from transformers import BitsAndBytesConfig
+nf4_config = BitsAndBytesConfig(
+   load_in_4bit=True,
+   bnb_4bit_quant_type="nf4",
+   bnb_4bit_use_double_quant=True,  # Permet une seconde quantifiquation après la première pour sauvegarder en plus 0.4 bits par paramètre
+   bnb_4bit_compute_dtype=torch.bfloat16
+)
+model_nf4 = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=nf4_config)
+```
+
+On utilise la double quantifiquation quand on a des problèpmpes d emémoires, la quantifiquation NF4 pour une méilleure précision et le dtype 16-bit pour un finetuning plus rapide.
+
+Il n'est pas possible de faire un pure entrainement 4-bit sur ces modèles. Cependant, on peut entrainer ces modèles en tirant parti des méthodes PEFT et en entrainant des adapteurs au dessus d'eux. 
