@@ -1,5 +1,7 @@
 # Large Language models
 
+* [Fine-tune Falcon 180B with DeepSpeed ZeRO, LoRA & Flash Attention](https://www.philschmid.de/deepspeed-lora-flash-attention)
+
 ## LLM for text
 
 | language model | Authors | Release Date | Checkpoints | Params | Context Length | Nb tokens trained | Try it | Paper |
